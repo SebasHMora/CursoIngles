@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding-block: 20px 36px; color: var
 .toolbtn { display: inline-flex; align-items: center; gap: 6px; }
 .toolbtn svg { width: 16px; height: 16px; }
 .btn.danger { background: var(--bad); border-color: var(--bad); color: var(--bg); }
-@media (max-width: 1400px) { .toolbtn span { display: none; } .toolbtn { padding-inline: 10px; } }
+.toolbtn span { display: none; } .toolbtn { padding-inline: 10px; }
 @media (max-width: 1239px) { .brand b { display: none; } }
 .top .wrap { max-width: 1280px; }
 .vpanel { border-top: 1px solid var(--line); background: var(--surface-2); padding-block: 14px; }
@@ -430,6 +430,27 @@ footer { border-top: 1px solid var(--line); padding-block: 20px 36px; color: var
 input.blank.wide { border: 0; border-bottom: 2.5px solid var(--fg); background: var(--hi-soft); }
 .reading { max-width: 70ch; display: flex; flex-direction: column; gap: 12px; }
 .reading p { margin: 0; font-size: 1.08rem; line-height: 1.7; }
+
+/* saved results */
+.restag { display: inline-block; font-size: .84rem; color: var(--muted); }
+.restag b { color: var(--fg); font-weight: 700; }
+.rt:empty { display: none; }
+.rt { margin-top: 6px; }
+.res-note span { color: var(--sign); font-weight: 600; }
+.readbox { display: flex; flex-direction: column; gap: 14px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.readbox .rtitle { margin: 0; font-family: var(--font-display); font-size: 1.2rem; }
+.restbl td, .restbl th { white-space: normal; }
+
+.restbl tr.pend td { opacity: .75; }
+.spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; margin-left: 8px; vertical-align: middle; }
+.spark i { display: block; width: 5px; background: var(--sign); border-radius: 1px; opacity: .8; }
+.restbl td:last-child { text-align: right; white-space: nowrap; }
+.restbl { min-width: 0; width: 100%; }
+.restbl th, .restbl td { padding-inline: 10px; }
+.restbl td:last-child { padding-inline-start: 4px; }
+.restbl .btn.sm { padding-inline: 10px; }
+.btn svg { width: 1.15em; height: 1.15em; flex: none; }
+.btn:has(svg) { display: inline-flex; align-items: center; gap: 8px; }
 </style>
 <div id="app"></div>
 <script>
@@ -457,8 +478,30 @@ function norm(s) {
 const KEY = 'ingles-irlanda-v1';
 let P = {};
 try { P = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { P = {}; }
-['units', 'wrong', 'vocab', 'weeks'].forEach(k => { P[k] = P[k] || {}; });
+['units', 'wrong', 'vocab', 'weeks', 'res'].forEach(k => { P[k] = P[k] || {}; });
 function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) { /* memory only */ } }
+
+/* saved results of every quiz: P.res[key] = { title, cat, href, tries, best, hist: [{ r, n, pct, at }] } */
+const fmtDate = t => { try { return new Date(t).toLocaleDateString('es', { day: 'numeric', month: 'short' }); } catch (e) { return ''; } };
+function resLast(key) { const r = P.res[key]; return r && r.hist && r.hist.length ? r.hist[r.hist.length - 1] : null; }
+function resTag(key) {
+  const r = P.res[key], l = resLast(key);
+  if (!l) return '';
+  return `<span class="restag">Último: <b>${l.r}/${l.n}</b> · Mejor: <b>${r.best}%</b> · ${r.tries} ${r.tries === 1 ? 'intento' : 'intentos'} · ${fmtDate(l.at)}</span>`;
+}
+function refreshTags() { document.querySelectorAll('[data-rt]').forEach(el => { el.innerHTML = resTag(el.dataset.rt); }); }
+function recordResult(key, meta, right, n) {
+  const r = P.res[key] || { tries: 0, best: 0, hist: [] };
+  const prev = resLast(key);
+  const pct = Math.round((right / n) * 100);
+  r.title = meta.title || key; r.cat = meta.cat || ''; r.href = meta.href || '';
+  r.tries += 1; r.best = Math.max(r.best || 0, pct);
+  r.hist.push({ r: right, n, pct, at: Date.now() });
+  if (r.hist.length > 20) r.hist.shift();
+  P.res[key] = r; save(); refreshTags();
+  return { prev, tries: r.tries, best: r.best };
+}
+const launcher = (key, title, desc, id) => `<div class="cta-end"><div><b>${title}</b><div class="small muted">${desc}</div><div class="rt" data-rt="${key}">${resTag(key)}</div></div><button class="btn primary" id="${id}" type="button">${resLast(key) ? 'Repetir test' : 'Empezar'}</button></div>`;
 
 /* speech */
 const CAN_SAY = (() => { try { return 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined'; } catch (e) { return false; } })();
@@ -638,13 +681,16 @@ function runQuiz(host, items, opt) {
 
   function result() {
     const pct = Math.round((right / items.length) * 100);
+    const rec = opt.key ? recordResult(opt.key, { title: opt.title, cat: opt.cat, href: opt.href }, right, items.length) : null;
+    const hist = rec ? `<p class="small muted res-note">${rec.prev ? `Intento ${rec.tries}. Antes: ${rec.prev.r}/${rec.prev.n}. ` : 'Primer intento. '}Mejor resultado: ${rec.best}%. <span>Resultado guardado.</span></p>` : '';
     host.innerHTML = `<div class="quiz"><div class="qcard result">
       <div class="lbl">${esc(opt.title || 'Resultado')}</div>
       <div class="big">${right}/${items.length}</div>
       <div class="bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
       <p>${pct >= 85 ? 'Muy bien. Dominas este tema.' : pct >= 60 ? 'Buen avance. Repasa los errores y vuelve a intentarlo.' : 'Aún falta práctica. Relee la teoría y repite la serie.'}</p>
+      ${hist}
       ${missed.length ? `<div class="missed"><h4>Para repasar</h4>${missed.map(m => `<div>${m.it.t === 'order' ? 'Frase: ' : ''}${m.it.q ? stripTags(m.it.q).replace('___', '…') : ''} <strong>${esc(m.answerText)}</strong></div>`).join('')}</div>` : ''}
-      <div class="row" id="after"><button class="btn primary" id="again" type="button">Repetir</button></div></div></div>`;
+      <div class="row" id="after"><button class="btn primary" id="again" type="button">Repetir test</button></div></div></div>`;
     $('#again', host).addEventListener('click', () => runQuiz(host, opt.reshuffle ? opt.reshuffle() : items, opt));
     if (opt.onDone) opt.onDone({ right, total: items.length, pct, host, missed: missed.map(m => m.it) });
   }
@@ -2703,6 +2749,305 @@ const DICTATIONS = [
   D('B2', 'Not only did she arrive late, but she also forgot her notes.'), D('B2', 'The report, which was published in June, has been widely discussed.'), D('B2', 'I wish I had learnt English when I was younger.'),
   D('B2', 'She is said to be one of the best teachers in the school.'), D('B2', 'I am looking forward to meeting you next week.'), D('B2', 'Had I understood the question, I would have answered it properly.'), D('B2', 'Despite the rain, we had a wonderful weekend in Galway.')
 ];
+/* ---------- Lecturas al final de cada unidad (U1–U13) ---------- */
+const UREAD = {};
+const UR = (id, title, text, gl, qs) => { UREAD[id] = { title, text, gl, qs }; };
+
+UR('U1', 'My New Flat in Dublin', [
+  `My name is Aoife and I'm a student in Dublin. I live in a small flat near the city centre. It isn't big, but it's very bright. There are two bedrooms, a kitchen and a bathroom. There is also a small living room with a sofa and a TV.`,
+  `I share the flat with my friend Tom. He is from Cork and he is a nurse. We are good friends. There is a supermarket across the street and there are two cafés on the corner. The Luas stop is only five minutes away, so it is easy to get to college. The only problem is the rent. It is €1,400 a month, and that is expensive. There isn't a washing machine in the flat, so we go to the launderette every Sunday.`
+], [['share', 'compartir'], ['rent', 'alquiler'], ['launderette', 'lavandería'], ['bright', 'luminoso'], ['corner', 'esquina']], [
+  mc(`Where is the flat?`, [`Near the city centre`, `In Cork`, `Next to the college`, `Far from the Luas`], 0, `Dice: “a small flat near the city centre”.`),
+  mc(`Who does Aoife live with?`, [`Her friend Tom`, `Her sister`, `Her parents`, `Nobody`], 0, `Dice: “I share the flat with my friend Tom”.`),
+  mc(`Which of these is NOT in the flat?`, [`A washing machine`, `A sofa`, `A TV`, `A bathroom`], 0, `Dice: “There isn't a washing machine in the flat”.`),
+  mc(`What is the problem with the flat?`, [`The rent is expensive`, `It is too dark`, `It is far from college`, `There is no kitchen`], 0, `Dice: “The only problem is the rent”.`),
+  mc(`How far is the Luas stop?`, [`Five minutes away`, `Fifteen minutes away`, `Across the street`, `Inside the college`], 0, `Dice: “only five minutes away”.`)
+]);
+
+UR('U2', 'A Day in the Life of Maria', [
+  `Maria is a nurse at a hospital in Cork. She gets up at six o'clock every morning and has a quick breakfast: tea and toast. She doesn't drive, so she takes the bus to work. The bus leaves at 6.45 and it takes thirty minutes.`,
+  `Maria works twelve hours, from seven to seven. She looks after patients, answers phone calls and writes reports. She usually has lunch at one o'clock with her colleagues. They often eat soup and brown bread in the canteen. After work, she goes home, cooks dinner and watches a series. She doesn't go out during the week because she is very tired. At the weekend, she meets her friends in a pub and listens to live music.`
+], [['nurse', 'enfermera'], ['patients', 'pacientes'], ['colleagues', 'compañeros de trabajo'], ['canteen', 'comedor'], ['live music', 'música en vivo']], [
+  mc(`What time does Maria get up?`, [`At six o'clock`, `At seven o'clock`, `At half past six`, `At five o'clock`], 0, `Dice: “gets up at six o'clock”.`),
+  mc(`How does Maria go to work?`, [`By bus`, `By car`, `On foot`, `By bike`], 0, `Dice: “she takes the bus to work”.`),
+  mc(`How long is the bus journey?`, [`Thirty minutes`, `Forty-five minutes`, `One hour`, `Fifteen minutes`], 0, `Dice: “it takes thirty minutes”.`),
+  mc(`What does Maria do after work?`, [`She cooks dinner and watches a series`, `She goes to a pub`, `She studies English`, `She plays football`], 0, `Dice: “cooks dinner and watches a series”.`),
+  mc(`Why doesn't she go out during the week?`, [`Because she is very tired`, `Because she has no friends`, `Because she doesn't like pubs`, `Because the buses stop early`], 0, `Dice: “because she is very tired”.`)
+]);
+
+UR('U3', 'Saturday in Temple Bar', [
+  `It's Saturday afternoon and I'm sitting in a café in Temple Bar. It's raining, so everyone is wearing a coat. A street musician is playing the guitar outside and two tourists are taking photos of him. Next to me, a woman is reading a book and a man is working on his laptop.`,
+  `I'm waiting for my friend Lucía. She is coming from the airport because her sister is visiting Ireland this week. Right now, she is sending me a message: “I'm running for the bus! I'm arriving in ten minutes.” I'm drinking a hot chocolate and I'm planning our weekend. We're going to the cinema tonight, and tomorrow we're visiting Kilmainham Gaol. I'm learning English, so I'm also listening to the people around me.`
+], [['street musician', 'músico callejero'], ['tourist', 'turista'], ['laptop', 'portátil'], ['plan', 'planear'], ['Kilmainham Gaol', 'antigua cárcel de Dublín, hoy museo']], [
+  mc(`Where is the narrator?`, [`In a café in Temple Bar`, `At the airport`, `In a cinema`, `On a bus`], 0, `Dice: “sitting in a café in Temple Bar”.`),
+  mc(`Why is everyone wearing a coat?`, [`Because it is raining`, `Because it is snowing`, `Because the café is cold`, `Because it is evening`], 0, `Dice: “It's raining, so everyone is wearing a coat”.`),
+  mc(`What is the street musician doing?`, [`Playing the guitar`, `Taking photos`, `Reading a book`, `Singing in the café`], 0, `Dice: “is playing the guitar outside”.`),
+  mc(`Who is the narrator waiting for?`, [`Lucía`, `Her sister`, `A waiter`, `A tourist`], 0, `Dice: “I'm waiting for my friend Lucía”.`),
+  mc(`What are they doing tomorrow?`, [`Visiting Kilmainham Gaol`, `Going to the cinema`, `Going to the airport`, `Learning English`], 0, `Dice: “tomorrow we're visiting Kilmainham Gaol”. El cine es esta noche.`)
+]);
+
+UR('U4', 'My First Week in Ireland', [
+  `I arrived in Dublin on a rainy Monday in September. My flight was late, so I got to the hostel at midnight. The receptionist was very kind. She gave me a key and told me about breakfast. I was tired, so I went straight to bed.`,
+  `On Tuesday, I walked around the city. I visited Trinity College and bought a Leap Card for the bus. I also went to a bank, but I couldn't open an account because I didn't have a proof of address. On Wednesday, I looked at three flats. The first one was too small, the second one was too expensive and the third one was perfect. I called the landlord and he said yes. On Friday, I moved in. I was nervous, but my neighbours welcomed me with a cup of tea. It was a great first week.`
+], [['hostel', 'albergue'], ['receptionist', 'recepcionista'], ['proof of address', 'comprobante de domicilio'], ['landlord', 'casero'], ['welcome', 'dar la bienvenida']], [
+  mc(`Why did the narrator get to the hostel at midnight?`, [`The flight was late`, `The hostel was far away`, `The bus was slow`, `The narrator got lost`], 0, `Dice: “My flight was late, so I got to the hostel at midnight”.`),
+  mc(`What did the narrator buy on Tuesday?`, [`A Leap Card`, `A phone`, `A coat`, `A bus ticket to Cork`], 0, `Dice: “bought a Leap Card for the bus”.`),
+  mc(`Why couldn't the narrator open a bank account?`, [`There was no proof of address`, `The bank was closed`, `The passport was lost`, `The bank was too expensive`], 0, `Dice: “I didn't have a proof of address”.`),
+  mc(`What was wrong with the second flat?`, [`It was too expensive`, `It was too small`, `It was too far`, `It was too dark`], 0, `Dice: “the second one was too expensive”.`),
+  mc(`How did the neighbours welcome the narrator?`, [`With a cup of tea`, `With a party`, `With a letter`, `With flowers`], 0, `Dice: “welcomed me with a cup of tea”.`)
+]);
+
+UR('U5', 'The Night of the Storm', [
+  `Last winter, a big storm hit the west of Ireland. I was driving home from work at six o'clock when it started to get really bad. The wind was blowing hard and rain was hitting the windscreen. I wasn't driving fast, but I couldn't see the road well.`,
+  `While I was driving, I saw a tree across the road. A man was standing next to it with a torch and he was waving his arms. I stopped and we moved the tree together. When I got home, the lights weren't working. My flatmates were sitting in the dark and they were eating biscuits and singing. One of them was playing the guitar by candlelight. It wasn't a bad night in the end.`
+], [['storm', 'tormenta'], ['windscreen', 'parabrisas'], ['torch', 'linterna'], ['wave', 'hacer señas'], ['candlelight', 'luz de vela']], [
+  mc(`What was the narrator doing at six o'clock?`, [`Driving home from work`, `Cooking dinner`, `Walking in the park`, `Sleeping`], 0, `Dice: “I was driving home from work at six o'clock”.`),
+  mc(`What was the weather like?`, [`Windy and rainy`, `Sunny and warm`, `Foggy and cold`, `Snowy and quiet`], 0, `Dice: “The wind was blowing hard and rain was hitting the windscreen”.`),
+  mc(`What was the man next to the tree doing?`, [`Waving his arms`, `Cutting the tree`, `Driving a car`, `Taking photos`], 0, `Dice: “he was waving his arms”.`),
+  mc(`Why were the flatmates sitting in the dark?`, [`The lights weren't working`, `They wanted to sleep`, `They were watching a film`, `They were scared of the storm`], 0, `Dice: “the lights weren't working”.`),
+  mc(`What were the flatmates doing when the narrator got home?`, [`Eating biscuits and singing`, `Sleeping`, `Cleaning the flat`, `Phoning the landlord`], 0, `Dice: “eating biscuits and singing”.`)
+]);
+
+UR('U6', 'Plans for Next Weekend', [
+  `Next weekend is going to be busy for me. On Saturday morning, I'm meeting my landlord at ten o'clock. He is going to check the heating because it isn't working very well. I think he'll fix it quickly because he is a nice person. In the afternoon, I'm going to go shopping with my sister. We're going to buy a coat because winter is coming. Look at the sky today: it's going to be a cold weekend!`,
+  `On Sunday, we are going to take the train to Galway. The train leaves at 9.15 and it arrives at 12.00. We're going to walk along the beach and have lunch in a pub. I hope it won't rain! Tomorrow I'll check the weather forecast and I'll pack an umbrella just in case. In the evening, we're going to watch a football match on TV. Perhaps we'll order a pizza.`
+], [['heating', 'calefacción'], ['fix', 'arreglar'], ['forecast', 'pronóstico'], ['pack', 'meter en la maleta'], ['just in case', 'por si acaso']], [
+  mc(`Who is the narrator meeting on Saturday morning?`, [`The landlord`, `A sister`, `A friend from Galway`, `A plumber`], 0, `Dice: “I'm meeting my landlord at ten o'clock”.`),
+  mc(`Why is the narrator meeting that person?`, [`To check the heating`, `To pay the rent`, `To sign a contract`, `To visit a flat`], 0, `Dice: “He is going to check the heating”.`),
+  mc(`What are the narrator and the sister going to buy?`, [`A coat`, `An umbrella`, `A pizza`, `Train tickets`], 0, `Dice: “We're going to buy a coat”.`),
+  mc(`What time does the train to Galway leave?`, [`At 9.15`, `At 12.00`, `At 10.00`, `At 9.50`], 0, `Dice: “The train leaves at 9.15”.`),
+  mc(`What will the narrator do tomorrow?`, [`Check the forecast and pack an umbrella`, `Go to Galway`, `Buy a coat`, `Watch a football match`], 0, `Dice: “Tomorrow I'll check the weather forecast and I'll pack an umbrella”.`)
+]);
+
+UR('U7', 'Tips for New Arrivals', [
+  `Are you new in Ireland? Here are some tips for your first weeks. First, you should get a PPS number. You need it to work and to use public services. You can make an appointment online and you must bring your passport. Second, you should open a bank account, but the bank may ask for proof of address, so ask your landlord for a letter.`,
+  `The weather can change very quickly, so you should always carry a raincoat. You can pay for the bus with a Leap Card and it's cheaper than cash. If you can't understand someone, don't worry: you can say “Could you speak more slowly, please?” Most Irish people are friendly and they'll help you. You shouldn't leave your bike without a lock because bike theft is common. Finally, you can join a local club to meet people. It could be sports, music or a book club.`
+], [['tip', 'consejo'], ['raincoat', 'impermeable'], ['lock', 'candado'], ['theft', 'robo'], ['club', 'club, grupo']], [
+  mc(`Why do you need a PPS number?`, [`To work and use public services`, `To open a Leap Card`, `To rent a bike`, `To travel by bus`], 0, `Dice: “You need it to work and to use public services”.`),
+  mc(`What must you bring to the PPS appointment?`, [`Your passport`, `A letter from your landlord`, `A Leap Card`, `A raincoat`], 0, `Dice: “you must bring your passport”.`),
+  mc(`How can you pay less on the bus?`, [`With a Leap Card`, `With cash`, `With a bank letter`, `With a club card`], 0, `Dice: “it's cheaper than cash”.`),
+  mc(`What can you say if you don't understand someone?`, [`“Could you speak more slowly, please?”`, `“Can you leave, please?”`, `“Do you have a lock?”`, `“Where is the bank?”`], 0, `Es la frase que propone el texto.`),
+  mc(`Why shouldn't you leave your bike without a lock?`, [`Bike theft is common`, `It may rain`, `The police will fine you`, `The bike will be heavy`], 0, `Dice: “bike theft is common”.`)
+]);
+
+UR('U8', 'Shopping at the Supermarket', [
+  `On Saturday I went to the supermarket to do the weekly shop. I needed some milk, a loaf of bread, a dozen eggs and some cheese. There wasn't much milk on the shelf, so I took the last two bottles. I also bought a few apples and a little butter. The vegetables were fresh, but they weren't cheap. How much are carrots now? Two euros for a small bag!`,
+  `At the checkout, the cashier asked me, “Do you need a bag?” In Ireland, you have to pay for plastic bags, so I always bring my own. I only had a little money in my wallet, so I paid by card. I spent about sixty euros. A lot of people say food is expensive here, and I agree. The good news is that there is always some special offer. Today, there were many offers on tea and biscuits, so I bought a few packets. My budget isn't happy, but my kitchen is full now!`
+], [['loaf', 'barra (de pan)'], ['dozen', 'docena'], ['shelf', 'estante'], ['checkout', 'caja'], ['special offer', 'oferta']], [
+  mc(`Why did the narrator take the last two bottles of milk?`, [`There wasn't much milk`, `Milk was very cheap`, `The cashier recommended it`, `There was an offer`], 0, `Dice: “There wasn't much milk on the shelf”.`),
+  mc(`What did the narrator buy a few of?`, [`Apples`, `Eggs`, `Bottles of milk`, `Carrots`], 0, `Dice: “a few apples”. Los huevos eran “a dozen”.`),
+  mc(`Why does the narrator bring their own bag?`, [`In Ireland you have to pay for plastic bags`, `The shop doesn't have bags`, `Bags are heavy`, `The cashier asks for it`], 0, `Dice: “you have to pay for plastic bags”.`),
+  mc(`How did the narrator pay?`, [`By card`, `In cash`, `By phone`, `With a voucher`], 0, `Dice: “I paid by card”.`),
+  mc(`Which products were on special offer?`, [`Tea and biscuits`, `Milk and cheese`, `Apples and carrots`, `Bread and butter`], 0, `Dice: “many offers on tea and biscuits”.`)
+]);
+
+UR('U9', 'Dublin or Cork?', [
+  `Many people ask me: “Which is better, Dublin or Cork?” I have lived in both cities, so I can compare them. Dublin is bigger and busier than Cork. There are more jobs, more shops and more international food. But it is also more expensive, especially the rent.`,
+  `Cork is smaller and friendlier. Some people from Cork joke that it is the “real capital” of Ireland! You can walk across the city centre in twenty minutes, so you don't need a bus. The English Market is one of the best places in the country to buy fresh food. It rains a lot in both cities, and nobody is surprised by it. For me, Dublin is the most exciting city, but Cork is the most relaxing one. The best choice depends on you.`
+], [['compare', 'comparar'], ['busier', 'más concurrido'], ['friendlier', 'más amable'], ['exciting', 'emocionante'], ['relaxing', 'relajante']], [
+  mc(`Which city is bigger?`, [`Dublin`, `Cork`, `They are the same size`, `The text doesn't say`], 0, `Dice: “Dublin is bigger and busier than Cork”.`),
+  mc(`What is a disadvantage of Dublin?`, [`It is more expensive`, `It has fewer jobs`, `It has no shops`, `It is too small`], 0, `Dice: “it is also more expensive, especially the rent”.`),
+  mc(`How long does it take to walk across Cork city centre?`, [`Twenty minutes`, `Two hours`, `Five minutes`, `One hour`], 0, `Dice: “walk across the city centre in twenty minutes”.`),
+  mc(`What is the English Market good for?`, [`Buying fresh food`, `Finding a flat`, `Watching music`, `Learning English`], 0, `Dice: “the best places … to buy fresh food”.`),
+  mc(`Which sentence matches the writer's opinion?`, [`Dublin is more exciting, but Cork is more relaxing.`, `Cork is more exciting than Dublin.`, `Dublin is cheaper than Cork.`, `Both cities are the same.`], 0, `Dice: “Dublin is the most exciting city, but Cork is the most relaxing one”.`)
+]);
+
+UR('U10', 'Three Months in Galway', [
+  `I have lived in Galway for three months and I have already learned a lot about Irish life. I have made new friends, I have tried traditional music sessions and I have even learned a few words in Irish. I haven't seen the Cliffs of Moher yet, but I have booked a bus tour for next month.`,
+  `Of course, it hasn't all been easy. I have had problems with my phone contract, and I have changed rooms twice. My first landlord has never answered my emails! Have you ever lived abroad? If you have, you'll know the feeling. Since I arrived, I have been to a lot of places, but I still haven't found a café with coffee as good as at home. My English has improved a lot since I started the course, and I have just got a part-time job in a bar. I'm tired but happy.`
+], [['session', 'sesión (de música)'], ['contract', 'contrato'], ['improve', 'mejorar'], ['part-time', 'a tiempo parcial'], ['abroad', 'en el extranjero']], [
+  mc(`How long has the narrator lived in Galway?`, [`Three months`, `Three weeks`, `Three years`, `Six months`], 0, `Dice: “I have lived in Galway for three months”.`),
+  mc(`What hasn't the narrator done yet?`, [`Seen the Cliffs of Moher`, `Made new friends`, `Learned words in Irish`, `Changed rooms`], 0, `Dice: “I haven't seen the Cliffs of Moher yet”.`),
+  mc(`Which problem has the narrator had?`, [`With a phone contract`, `With the bus tour`, `With the course`, `With the weather`], 0, `Dice: “I have had problems with my phone contract”.`),
+  mc(`What has the narrator just got?`, [`A part-time job`, `A new flat`, `A phone`, `A bus ticket`], 0, `Dice: “I have just got a part-time job”.`),
+  mc(`What has improved since the narrator started the course?`, [`The narrator's English`, `The weather`, `The landlord`, `The coffee`], 0, `Dice: “My English has improved a lot”.`)
+]);
+
+UR('U11', 'Looking for a Job', [
+  `I have been looking for a job for six weeks and it is harder than I expected. Every morning I have been checking job websites and I have been sending about five applications a day. Last week, a restaurant manager called me and I have been preparing for the interview ever since. I have been practising answers in front of the mirror and my flatmate has been helping me with my pronunciation.`,
+  `A friend told me that many companies in Ireland use agencies, so I have been visiting recruitment offices too. I have been waiting for a reply from two of them for ten days. I'm a bit tired because I haven't been sleeping well. I have been worrying too much. But my teacher says, “You have been working hard, and the results will come.” I hope she's right. I have also been volunteering at a charity shop on Saturdays. It isn't paid, but it gives me experience and I have been meeting very nice people.`
+], [['application', 'solicitud'], ['interview', 'entrevista'], ['recruitment agency', 'agencia de empleo'], ['charity shop', 'tienda solidaria'], ['volunteer', 'hacer voluntariado']], [
+  mc(`How long has the narrator been looking for a job?`, [`Six weeks`, `Six days`, `Six months`, `Ten days`], 0, `Dice: “for six weeks”. Los diez días son la espera de respuesta.`),
+  mc(`How many applications has the narrator been sending a day?`, [`About five`, `About fifty`, `About two`, `About ten`], 0, `Dice: “about five applications a day”.`),
+  mc(`Who has been helping with pronunciation?`, [`The flatmate`, `The teacher`, `The restaurant manager`, `A friend`], 0, `Dice: “my flatmate has been helping me with my pronunciation”.`),
+  mc(`Why is the narrator tired?`, [`Because they haven't been sleeping well`, `Because they work twelve hours`, `Because they study at night`, `Because they travel a lot`], 0, `Dice: “I haven't been sleeping well”.`),
+  mc(`What has the narrator been doing on Saturdays?`, [`Volunteering at a charity shop`, `Visiting recruitment offices`, `Practising at the mirror`, `Working in a restaurant`], 0, `Dice: “volunteering at a charity shop on Saturdays”.`)
+]);
+
+UR('U12', 'The Day I Lost My Passport', [
+  `Last Tuesday was a terrible day. When I arrived at the airport, I realised that I had left my passport at home. I had packed my suitcase the night before and I had checked my tickets twice, but I had forgotten the most important thing. I called my flatmate and asked him to look for it. He had already gone to work, but he came back to the flat and found the passport on the kitchen table.`,
+  `By the time he reached the airport, my flight had taken off. I had missed it by thirty minutes. The airline told me that I had to buy a new ticket because I had missed my flight. I had never felt so stupid! After I had calmed down, I had a coffee and called my boss. Fortunately, he was very understanding. He told me that he had once missed a flight too, so I could take a later one the next day. Since then, I always check my bag three times.`
+], [['realise', 'darse cuenta'], ['suitcase', 'maleta'], ['take off', 'despegar'], ['calm down', 'calmarse'], ['understanding', 'comprensivo']], [
+  mc(`What had the narrator forgotten?`, [`The passport`, `The tickets`, `The suitcase`, `The phone`], 0, `Dice: “I had left my passport at home”.`),
+  mc(`Where had the passport been left?`, [`On the kitchen table`, `In the suitcase`, `At the airport`, `At the office`], 0, `Dice: “found the passport on the kitchen table”.`),
+  mc(`Why did the narrator have to buy a new ticket?`, [`Because the flight had been missed`, `Because the passport was lost`, `Because the boss asked for it`, `Because the old ticket was wrong`], 0, `Dice: “I had to buy a new ticket because I had missed my flight”.`),
+  mc(`How did the boss react?`, [`He was very understanding`, `He was angry`, `He didn't answer`, `He cancelled the trip`], 0, `Dice: “he was very understanding”.`),
+  mc(`What had happened to the flight when the flatmate reached the airport?`, [`It had taken off`, `It had been cancelled`, `It was boarding`, `It was late`], 0, `Dice: “my flight had taken off”.`)
+]);
+
+UR('U13', 'Rules at Work and at Home', [
+  `Starting a new job in Ireland means learning new rules. At my restaurant, we have to wear a uniform and we must wash our hands before touching food. Staff mustn't use their phones in the kitchen because it's not hygienic. I don't have to work on Sundays, but I can if I need extra money. Some of my colleagues must work late because the restaurant closes at midnight.`,
+  `At home, there are rules too. My landlord says we mustn't smoke inside the flat, and we have to put the rubbish in the right bin. We don't have to pay for the internet because it's included, but we must pay the electricity bill every two months. Tonight we can hear a noise on the stairs. It can't be the landlord because he is away. It might be a neighbour and it could be the wind. Wait… it's only a cat!`
+], [['uniform', 'uniforme'], ['hygienic', 'higiénico'], ['rubbish', 'basura'], ['bin', 'cubo de basura'], ['bill', 'factura']], [
+  mc(`What must staff do before touching food?`, [`Wash their hands`, `Wear a hat`, `Use their phones`, `Check the time`], 0, `Dice: “we must wash our hands before touching food”.`),
+  mc(`What mustn't staff do in the kitchen?`, [`Use their phones`, `Wear a uniform`, `Work late`, `Wash their hands`], 0, `Dice: “Staff mustn't use their phones in the kitchen”.`),
+  mc(`What doesn't the narrator have to do?`, [`Work on Sundays`, `Wear a uniform`, `Wash hands`, `Pay the electricity bill`], 0, `Dice: “I don't have to work on Sundays”.`),
+  mc(`What is NOT allowed at home?`, [`Smoking inside the flat`, `Using the internet`, `Having a neighbour`, `Putting rubbish in a bin`], 0, `Dice: “we mustn't smoke inside the flat”.`),
+  mc(`Why can't the noise on the stairs be the landlord?`, [`Because he is away`, `Because he is a cat`, `Because he lives in Cork`, `Because he is asleep`], 0, `Dice: “It can't be the landlord because he is away”.`)
+]);
+/* ---------- Lecturas al final de cada unidad (U14–U26) ---------- */
+UR('U14', 'If I Get the Job…', [
+  `I have a job interview tomorrow, and I'm very nervous. If I get the job, I'll earn €2,000 a month and I'll be able to rent a bigger flat. If I don't get it, I'll keep looking, because I never give up. My sister always says that if you practise a lot, you feel more confident. So tonight I'll practise my answers one more time.`,
+  `Sometimes I imagine a different life. If I had more money, I would travel around Europe for a year. If I lived in the countryside, I would have a dog and a small garden. If I could speak perfect English, I would apply for a job in an international company. But I'm realistic. If you work hard, you usually get results. And if the interview goes well, I'll celebrate with a pint in the pub. If it rains tomorrow, I'll take a taxi, because I don't want to arrive wet!`
+], [['nervous', 'nervioso'], ['earn', 'ganar (dinero)'], ['give up', 'rendirse'], ['confident', 'seguro de sí mismo'], ['apply for', 'solicitar']], [
+  mc(`How much will the narrator earn if they get the job?`, [`€2,000 a month`, `€2,000 a year`, `€1,000 a month`, `€200 a week`], 0, `Dice: “I'll earn €2,000 a month”.`),
+  mc(`What will the narrator do if they don't get the job?`, [`Keep looking`, `Travel around Europe`, `Move to the countryside`, `Stop working`], 0, `Dice: “I'll keep looking”.`),
+  mc(`What would the narrator do with more money?`, [`Travel around Europe for a year`, `Buy a house`, `Open a restaurant`, `Learn English`], 0, `Dice: “If I had more money, I would travel around Europe for a year”.`),
+  mc(`What would the narrator have if they lived in the countryside?`, [`A dog and a small garden`, `A horse`, `A big house`, `A car`], 0, `Dice: “I would have a dog and a small garden”.`),
+  mc(`What will the narrator do if it rains tomorrow?`, [`Take a taxi`, `Stay at home`, `Cancel the interview`, `Take the bus`], 0, `Dice: “If it rains tomorrow, I'll take a taxi”.`)
+]);
+
+UR('U15', 'How Is a Pint of Guinness Made?', [
+  `Guinness is one of the most famous drinks in Ireland. It is made in Dublin, at the St James's Gate Brewery, and it has been produced there since 1759. Four main ingredients are used: water, barley, hops and yeast. First, the barley is roasted, and this gives the drink its dark colour. Then the barley is mixed with hot water and the liquid is boiled with the hops.`,
+  `After that, yeast is added and the beer is left to ferment. When it is ready, it is sent to pubs all over the world in barrels and cans. A pint of Guinness isn't poured quickly. It is poured in two stages, and it is left to settle for a short time between them. Many Irish people say that a good pint can't be rushed. Visitors are welcome at the Guinness Storehouse in Dublin, where the whole process is explained and where a pint is included in the ticket.`
+], [['brewery', 'cervecería (fábrica)'], ['barley', 'cebada'], ['hops', 'lúpulo'], ['yeast', 'levadura'], ['ferment', 'fermentar']], [
+  mc(`Where is Guinness made?`, [`At St James's Gate Brewery in Dublin`, `In a pub in Cork`, `At the Guinness Storehouse in Galway`, `In many countries`], 0, `Dice: “It is made in Dublin, at the St James's Gate Brewery”.`),
+  mc(`What gives Guinness its dark colour?`, [`The roasted barley`, `The hops`, `The yeast`, `The water`], 0, `Dice: “the barley is roasted, and this gives the drink its dark colour”.`),
+  mc(`What happens after the yeast is added?`, [`The beer is left to ferment`, `The barley is roasted`, `The beer is poured into pints`, `The hops are boiled`], 0, `Dice: “yeast is added and the beer is left to ferment”.`),
+  mc(`How is a pint of Guinness poured?`, [`In two stages`, `Very quickly`, `In one go`, `From a can only`], 0, `Dice: “It is poured in two stages”.`),
+  mc(`What is included in the ticket for the Storehouse?`, [`A pint`, `A meal`, `A bus tour`, `A Guinness hat`], 0, `Dice: “a pint is included in the ticket”.`)
+]);
+
+UR('U16', 'A Difficult Phone Call with the Landlord', [
+  `Yesterday I called my landlord because the heating wasn't working. He said that he was in Spain on holiday and that he couldn't come until Friday. I told him that my flatmates and I were freezing. He said he would send a plumber the next day. I asked him if the plumber could come in the morning. He said that he didn't know but that he would call me later.`,
+  `At six o'clock the plumber phoned. He asked me where the boiler was and whether it was making any strange noises. I explained that it was in the kitchen and that it had been making a loud sound for two days. He told me not to touch it and said he would arrive at nine the next morning. My flatmate asked me if we should buy electric heaters. I said that it was a good idea. This morning the plumber came, fixed the boiler and told us to check the temperature again in the evening.`
+], [['plumber', 'fontanero'], ['boiler', 'caldera'], ['freezing', 'helados'], ['heater', 'estufa, calefactor'], ['fix', 'arreglar']], [
+  mc(`Why did the narrator call the landlord?`, [`The heating wasn't working`, `The rent was late`, `A window was broken`, `The flat was too cold to sell`], 0, `Dice: “because the heating wasn't working”.`),
+  mc(`Where was the landlord?`, [`In Spain on holiday`, `At the flat`, `At work in Dublin`, `At the plumber's`], 0, `Dice: “he was in Spain on holiday”.`),
+  mc(`What did the plumber ask on the phone?`, [`Where the boiler was`, `How much the rent was`, `Who the landlord was`, `When the heating started`], 0, `Dice: “He asked me where the boiler was”.`),
+  mc(`What did the plumber tell the narrator not to do?`, [`Touch the boiler`, `Call the landlord`, `Buy heaters`, `Open the kitchen`], 0, `Dice: “He told me not to touch it”.`),
+  mc(`What did the plumber tell them to do in the evening?`, [`Check the temperature again`, `Call him again`, `Buy electric heaters`, `Turn off the boiler`], 0, `Dice: “told us to check the temperature again in the evening”.`)
+]);
+
+UR('U17', 'Questions at the Doctor\'s', [
+  `Receptionist: Good morning. Have you got an appointment?`,
+  `Sofia: Yes, I have. It's at 10.30 with Dr Murphy.`,
+  `Receptionist: What's your surname, please? And could you tell me your date of birth?`,
+  `Sofia: It's Alvarez, and I was born on the 4th of May, 1994. Do you know if the doctor is running late?`,
+  `Receptionist: She's running about ten minutes late. Please take a seat.`,
+  `Dr Murphy: Hello, Sofia. What seems to be the problem?`,
+  `Sofia: I've had a sore throat for three days.`,
+  `Dr Murphy: Does it hurt when you swallow? Have you taken any medicine?`,
+  `Sofia: Yes, it does. I've only taken paracetamol. Do you think it's serious?`,
+  `Dr Murphy: No. You have a throat infection. I'll give you a prescription. Take the tablets twice a day and drink plenty of water. You'll come back if you aren't better in a week, won't you?`,
+  `Sofia: Of course. Could you tell me where the nearest pharmacy is?`,
+  `Dr Murphy: There's one next to the post office.`
+], [['appointment', 'cita'], ['surname', 'apellido'], ['sore throat', 'dolor de garganta'], ['prescription', 'receta médica'], ['running late', 'con retraso']], [
+  mc(`What time is Sofia's appointment?`, [`10.30`, `10.40`, `9.30`, `11.00`], 0, `Dice: “It's at 10.30 with Dr Murphy”.`),
+  mc(`Why does Sofia have to wait?`, [`The doctor is running late`, `She forgot her appointment`, `The doctor is on holiday`, `The receptionist is busy`], 0, `Dice: “She's running about ten minutes late”.`),
+  mc(`How long has Sofia had a sore throat?`, [`Three days`, `A week`, `Ten minutes`, `Two days`], 0, `Dice: “for three days”.`),
+  mc(`What does the doctor give Sofia?`, [`A prescription`, `Some paracetamol`, `A sick note`, `An appointment card`], 0, `Dice: “I'll give you a prescription”.`),
+  mc(`Where is the nearest pharmacy?`, [`Next to the post office`, `Next to the doctor's surgery`, `Opposite the bank`, `Behind the hospital`], 0, `Dice: “There's one next to the post office”.`)
+]);
+
+UR('U18', 'Life in Five Years', [
+  `This time next year, I'll be finishing the last module of my English course and I'll be preparing for the final exam. By then, I will have saved enough money for a deposit, so I'll be looking for a flat of my own. In five years, I hope I will have found a stable job in my field. I will probably be living in Cork, and I will be working for an organisation that supports small businesses.`,
+  `Of course, plans can change. By the end of this year, I will have met many new people, and some of them might change the way I think. Next summer, while my friends are lying on a beach, I will be working double shifts to pay my debts. But in ten years' time, I'll look back and I'll say that it was worth it. By the time I'm forty, I will have been living abroad for fifteen years, and I will have learned how to be patient. What will you be doing in five years?`
+], [['deposit', 'depósito, fianza'], ['stable', 'estable'], ['shift', 'turno de trabajo'], ['debt', 'deuda'], ['worth it', 'valer la pena']], [
+  mc(`What will the narrator be doing this time next year?`, [`Finishing the last module and preparing for the exam`, `Working double shifts`, `Living in Cork`, `Looking for a stable job`], 0, `Dice: “I'll be finishing the last module … and preparing for the final exam”.`),
+  mc(`What will the narrator have done by then?`, [`Saved enough money for a deposit`, `Bought a flat`, `Found a stable job`, `Paid all debts`], 0, `Dice: “I will have saved enough money for a deposit”.`),
+  mc(`Where will the narrator probably be living in five years?`, [`In Cork`, `In Dublin`, `In Galway`, `Abroad, in an unknown city`], 0, `Dice: “I will probably be living in Cork”.`),
+  mc(`What will the narrator be doing next summer?`, [`Working double shifts`, `Lying on a beach`, `Travelling with friends`, `Studying for exams`], 0, `Dice: “I will be working double shifts to pay my debts”.`),
+  mc(`What does the narrator say about the age of forty?`, [`They will have lived abroad for fifteen years`, `They will have retired`, `They will be living at home again`, `They will have bought a house in Cork`], 0, `Dice: “I will have been living abroad for fifteen years”.`)
+]);
+
+UR('U19', 'If Only I Had Left Earlier', [
+  `Last month I missed an important job interview, and I still think about it every day. If I had left home ten minutes earlier, I would have caught the 8.15 bus. If I had checked the timetable the night before, I would have known that the bus was cancelled because of roadworks. And if I hadn't stopped for a coffee, I wouldn't have been late. Had I known how important it was, I would have taken a taxi.`,
+  `My friend told me that I shouldn't be so hard on myself. She said that if I had arrived on time, the result might not have been different. Perhaps she is right. But I still wish I had been more careful. If I had got the job, I would be working in the city centre now, and I wouldn't be sharing a tiny flat with three strangers. That morning, I went into a café to calm down, and that is where I met my current boss. If I hadn't missed the interview, I wouldn't have met him, and I wouldn't have this job today.`
+], [['roadworks', 'obras en la carretera'], ['timetable', 'horario'], ['stranger', 'desconocido'], ['calm down', 'calmarse'], ['hard on yourself', 'duro con uno mismo']], [
+  mc(`What would have happened if the narrator had left ten minutes earlier?`, [`They would have caught the 8.15 bus`, `They would have taken a taxi`, `They would have got the job`, `They would have stopped for coffee`], 0, `Dice: “I would have caught the 8.15 bus”.`),
+  mc(`Why was the bus cancelled?`, [`Because of roadworks`, `Because of a storm`, `Because of a strike`, `Because of an accident`], 0, `Dice: “cancelled because of roadworks”.`),
+  mc(`What does the narrator's friend think?`, [`The narrator shouldn't be so hard on themselves`, `The narrator should look for another job`, `The narrator was lazy`, `The narrator should buy a car`], 0, `Dice: “I shouldn't be so hard on myself”.`),
+  mc(`Where would the narrator be working if they had got the job?`, [`In the city centre`, `In a café`, `In a tiny flat`, `At home`], 0, `Dice: “I would be working in the city centre now”.`),
+  mc(`How did the narrator meet their current boss?`, [`In a café, after the missed interview`, `At the job interview`, `Through a friend`, `On the bus`], 0, `Dice: “I went into a café to calm down, and that is where I met my current boss”.`)
+]);
+
+UR('U20', 'Who Left the Door Open?', [
+  `When I got back to my flat last night, the front door was open. I was sure that I had locked it that morning. I might have forgotten, but I really don't think so. Inside, the lights were on and a window was open. Someone must have been inside. My laptop was still on the table, so it can't have been a burglar. A thief would have taken it. Then I noticed muddy footprints on the carpet. They were too small to be a man's, so they couldn't have been my landlord's.`,
+  `I called my flatmate, who was at work. She told me that she should have called me earlier: she had lent the keys to her cousin, who needed to pick up a suitcase. “He may have left in a hurry,” she said. “I shouldn't have given him the keys without asking you.” She apologised. I told her that she needn't have apologised, but that she could have sent me a message. In the end, nothing was missing. It could have been much worse.`
+], [['burglar', 'ladrón (que entra en casa)'], ['footprints', 'huellas'], ['muddy', 'embarrado'], ['lend', 'prestar'], ['apologise', 'pedir perdón']], [
+  mc(`Why does the narrator think it wasn't a burglar?`, [`The laptop was still on the table`, `The door was locked`, `The window was closed`, `Nothing was open`], 0, `Dice: “My laptop was still on the table, so it can't have been a burglar”.`),
+  mc(`What do the footprints suggest?`, [`The person had small feet, so it wasn't the landlord`, `A big man came in`, `It was the flatmate`, `A dog came in`], 0, `Dice: “too small to be a man's”.`),
+  mc(`Who had the keys?`, [`The flatmate's cousin`, `The landlord`, `A thief`, `The neighbour`], 0, `Dice: “she had lent the keys to her cousin”.`),
+  mc(`What does the flatmate regret?`, [`Giving the keys without asking`, `Calling the narrator`, `Leaving the window open`, `Losing her phone`], 0, `Dice: “I shouldn't have given him the keys without asking you”.`),
+  mc(`What does the narrator think the flatmate could have done?`, [`Sent a message`, `Called the police`, `Locked the door`, `Taken the suitcase`], 0, `Dice: “she could have sent me a message”.`)
+]);
+
+UR('U21', 'Learning to Surf in Donegal', [
+  `I have always enjoyed being near the sea, but I never considered surfing until last summer. A friend suggested trying a weekend course in Donegal, so I decided to book one. At first, I was afraid of falling into cold water. The instructor told me not to worry and advised me to wear a thick wetsuit. I managed to stand up on the board after about two hours, which surprised me.`,
+  `I can't stop thinking about it now. I'm looking forward to going back next month, and I'm planning to buy my own board. I avoid checking the weather forecast too often, because it can be depressing in Ireland, but surfing doesn't need good weather. I remember seeing dolphins once while I was waiting for a wave. I'll never forget that moment. Learning a new sport has taught me to accept failing and to keep trying. Next time, I'll try to stay on the board for longer than ten seconds!`
+], [['wetsuit', 'traje de neopreno'], ['instructor', 'monitor'], ['board', 'tabla'], ['wave', 'ola'], ['depressing', 'deprimente']], [
+  mc(`Who suggested the surf course?`, [`A friend`, `The instructor`, `A sister`, `A colleague`], 0, `Dice: “A friend suggested trying a weekend course”.`),
+  mc(`What was the narrator afraid of at first?`, [`Falling into cold water`, `Meeting dolphins`, `Missing the bus`, `Buying a board`], 0, `Dice: “afraid of falling into cold water”.`),
+  mc(`What advice did the instructor give?`, [`To wear a thick wetsuit`, `To buy a board`, `To avoid the sea`, `To check the forecast`], 0, `Dice: “advised me to wear a thick wetsuit”.`),
+  mc(`How long did it take the narrator to stand up on the board?`, [`About two hours`, `About ten seconds`, `A whole weekend`, `Two days`], 0, `Dice: “after about two hours”.`),
+  mc(`What is the narrator looking forward to?`, [`Going back next month`, `Buying a car`, `Seeing dolphins again tomorrow`, `Stopping surfing`], 0, `Dice: “I'm looking forward to going back next month”.`)
+]);
+
+UR('U22', 'A Guide to the Best of Cork', [
+  `Cork is a city where you can spend a whole weekend without getting bored. The English Market, which dates back to the eighteenth century, is the place where locals buy fresh fish, cheese and bread. It is run by traders whose families have worked there for generations. If you are hungry, ask the man who sells olives; he'll tell you what to try.`,
+  `The Shandon Bells, which are on the tower of St Anne's Church, are another attraction that visitors love. You can ring them yourself, which is a lot of fun. Not far from there, there is a small pub whose walls are covered with old photographs. It is the kind of place where musicians arrive with their instruments and start playing without warning. Finally, take the train to Cobh, the town from which many Irish emigrants left for America. It is a trip that you won't regret.`
+], [['trader', 'comerciante'], ['generation', 'generación'], ['tower', 'torre'], ['emigrant', 'emigrante'], ['regret', 'lamentar']], [
+  mc(`What can you buy at the English Market?`, [`Fresh fish, cheese and bread`, `Clothes and shoes`, `Books and music`, `Tickets for trains`], 0, `Dice: “locals buy fresh fish, cheese and bread”.`),
+  mc(`Who runs the market?`, [`Traders whose families have worked there for generations`, `The city council`, `Tourists`, `A big supermarket`], 0, `Dice: “run by traders whose families have worked there for generations”.`),
+  mc(`Where are the Shandon Bells?`, [`On the tower of St Anne's Church`, `In the English Market`, `In a pub`, `In Cobh`], 0, `Dice: “on the tower of St Anne's Church”.`),
+  mc(`What is special about the small pub?`, [`Its walls are covered with old photographs`, `It sells olives`, `It has a tower`, `It is on a train`], 0, `Dice: “a small pub whose walls are covered with old photographs”.`),
+  mc(`Why is Cobh important?`, [`Many Irish emigrants left for America from there`, `It has the oldest market`, `It has the Shandon Bells`, `It is the capital of Ireland`], 0, `Dice: “the town from which many Irish emigrants left for America”.`)
+]);
+
+UR('U23', 'Renovating an Old House', [
+  `Last year, my partner and I bought an old cottage in County Clare. It is believed to be more than two hundred years old, and it is said to have belonged to a local fisherman. The house needed a lot of work, so we decided to have everything done by professionals. We had the roof repaired in March, and we had the windows replaced in April. We are having the kitchen redesigned at the moment, and next month we're going to have the walls painted.`,
+  `It was a big decision, because renovations are known to be expensive. We were told that the work would be finished in three months, but it has taken almost a year. We were given a list of problems by the builder, and every week we are asked to approve new costs. Still, we don't regret it. The cottage is being brought back to life, and the neighbours say it has never looked so good. Next year, we hope to have a small garden planted and to have our names carved on the door.`
+], [['cottage', 'casa de campo'], ['roof', 'tejado'], ['replace', 'reemplazar'], ['renovation', 'reforma'], ['carve', 'tallar']], [
+  mc(`What is said about the cottage?`, [`It belonged to a local fisherman`, `It was built last year`, `It is very cheap`, `It was a school`], 0, `Dice: “it is said to have belonged to a local fisherman”.`),
+  mc(`What did the owners have done in March?`, [`The roof was repaired`, `The windows were replaced`, `The kitchen was redesigned`, `The walls were painted`], 0, `Dice: “We had the roof repaired in March”.`),
+  mc(`What are they having done at the moment?`, [`The kitchen redesigned`, `The roof repaired`, `The garden planted`, `The door carved`], 0, `Dice: “We are having the kitchen redesigned at the moment”.`),
+  mc(`How long were they told the work would take?`, [`Three months`, `One year`, `Six weeks`, `Two years`], 0, `Dice: “We were told that the work would be finished in three months”.`),
+  mc(`What do the neighbours say about the cottage?`, [`It has never looked so good`, `It is too old`, `It is too expensive`, `It needs more work`], 0, `Dice: “the neighbours say it has never looked so good”.`)
+]);
+
+UR('U24', 'Why Do People Move to Ireland?', [
+  `Every year, thousands of people move to Ireland for different reasons. Some come because there are plenty of jobs in technology and healthcare. Others come in order to study at one of the country's universities. Many also come so that their children can grow up speaking English. Although life in Ireland is not cheap, they say it is worth the cost.`,
+  `Despite the rainy weather, most newcomers describe Ireland as a friendly place. It is so easy to start a conversation that you can make friends at a bus stop. However, there are also difficulties. Housing is too expensive for many people, so they have to share a flat with strangers. The rent is so high that some people spend a large part of their salary on it. Even so, most of them stay. They say that the people, the music and the landscapes make everything easier.`
+], [['newcomer', 'recién llegado'], ['housing', 'vivienda'], ['landscape', 'paisaje'], ['worth', 'merecer la pena'], ['salary', 'sueldo']], [
+  mc(`Why do some people move to Ireland for work?`, [`There are plenty of jobs in technology and healthcare`, `Salaries are the highest in Europe`, `Housing is cheap`, `The weather is warm`], 0, `Dice: “plenty of jobs in technology and healthcare”.`),
+  mc(`Why do some parents move to Ireland?`, [`So that their children can grow up speaking English`, `To escape the rain`, `To open a business`, `To buy a house`], 0, `Dice: “so that their children can grow up speaking English”.`),
+  mc(`How do most newcomers describe Ireland, despite the weather?`, [`As a friendly place`, `As a cold country`, `As an easy place to find a flat`, `As a boring place`], 0, `Dice: “most newcomers describe Ireland as a friendly place”.`),
+  mc(`What is the main difficulty mentioned?`, [`Housing is too expensive`, `There are no jobs`, `People are unfriendly`, `English is difficult`], 0, `Dice: “Housing is too expensive for many people”.`),
+  mc(`Why do most people stay?`, [`They love the people, the music and the landscapes`, `They can't afford to leave`, `They have a good salary`, `They like the weather`], 0, `Dice: “the people, the music and the landscapes make everything easier”.`)
+]);
+
+UR('U25', 'Expat Thoughts', [
+  `Sometimes I wish I could be in two places at once. I love my new life in Ireland, but I miss my family terribly. I wish I had visited them more often before leaving, and I wish they lived closer. If only I could spend Sunday lunch with them! My mother says she'd rather I stayed in touch every day, but with the time difference it isn't easy.`,
+  `I also wish the weather were warmer. I wish it would stop raining for just one week! My friend says it's time I stopped complaining and bought a decent raincoat. She's right. I'd rather spend my money on a good coat than on another umbrella that breaks in the wind. Then again, there are things I wouldn't change. When I walk along the sea at dusk, I feel as if I had always lived here. And if I had never taken the risk, I would never have found out how strong I am.`
+], [['miss', 'echar de menos'], ['stay in touch', 'mantener el contacto'], ['time difference', 'diferencia horaria'], ['dusk', 'anochecer'], ['take the risk', 'asumir el riesgo']], [
+  mc(`What does the narrator wish about their family?`, [`That they lived closer`, `That they visited more often`, `That they came to Ireland`, `That they called less`], 0, `Dice: “I wish they lived closer”. Lo de visitarlos más se refiere al pasado y a sí mismo.`),
+  mc(`What would the narrator's mother rather?`, [`That the narrator stayed in touch every day`, `That the narrator came home`, `That the narrator bought a coat`, `That the narrator called once a week`], 0, `Dice: “she'd rather I stayed in touch every day”.`),
+  mc(`What does the narrator wish about the weather?`, [`That it would stop raining`, `That it were colder`, `That it were windier`, `That it never changed`], 0, `Dice: “I wish it would stop raining”.`),
+  mc(`What does the friend think?`, [`The narrator should stop complaining and buy a raincoat`, `The narrator should go home`, `The narrator should buy an umbrella`, `The narrator should visit the family`], 0, `Dice: “it's time I stopped complaining and bought a decent raincoat”.`),
+  mc(`How does the narrator feel when walking along the sea at dusk?`, [`As if they had always lived there`, `Sad and alone`, `Afraid of the weather`, `Eager to go home`], 0, `Dice: “I feel as if I had always lived here”.`)
+]);
+
+UR('U26', 'A Wet Weekend in Galway', [
+  `Never have I seen so much rain as during my first weekend in Galway. Not only was it raining, but the wind was also strong enough to turn my umbrella inside out. Hardly had I left the hostel when I was soaked. Rarely do tourists carry anything more than a light jacket, but here a proper raincoat is essential. It was the locals who seemed unbothered. One woman told me that what she loved about the weather was that you could never predict it.`,
+  `Only after I had bought a waterproof coat did I start to enjoy the city. No sooner had I put it on than the sun came out, which made everyone laugh. In the evening, I went into a pub where a band was playing. Seldom have I felt so welcome among strangers. Little did I know that I would return to that same pub every Friday for the next six months. What I remember most is not the weather, but the warmth of the people.`
+], [['soaked', 'empapado'], ['unbothered', 'tan tranquilo'], ['waterproof', 'impermeable'], ['predict', 'predecir'], ['warmth', 'calidez']], [
+  mc(`Why was the narrator's first weekend in Galway memorable?`, [`There was a lot of rain`, `The weather was perfect`, `The hostel was luxurious`, `The narrator lost a bag`], 0, `Dice: “Never have I seen so much rain”.`),
+  mc(`What happened to the narrator's umbrella?`, [`The wind turned it inside out`, `It was stolen`, `The narrator lost it`, `It was too small`], 0, `Dice: “strong enough to turn my umbrella inside out”.`),
+  mc(`Who seemed unbothered by the weather?`, [`The locals`, `The tourists`, `The narrator`, `The band`], 0, `Dice: “It was the locals who seemed unbothered”.`),
+  mc(`What happened when the narrator put on the new coat?`, [`The sun came out`, `It started to snow`, `The wind stopped`, `The rain got worse`], 0, `Dice: “No sooner had I put it on than the sun came out”.`),
+  mc(`What does the narrator remember most?`, [`The warmth of the people`, `The weather`, `The hostel`, `The music`], 0, `Dice: “not the weather, but the warmth of the people”.`)
+]);
 /* ---------- Vocabulary sets: [english, español, example] ---------- */
 const VOCAB = [
   { id: 'llegada', title: 'Llegada y trámites', sub: 'Aeropuerto, documentos y primeras gestiones', items: [
@@ -2970,7 +3315,7 @@ function shell() {
   <header class="top"><div class="wrap">
     <a class="brand" href="#inicio" aria-label="Inicio"><span class="plate"><span class="ga">Béarla</span><span class="en">EN</span></span><b>Inglés para Irlanda</b></a>
     <nav class="nav" aria-label="Secciones">${NAV.map(n => `<a href="#${n[0]}" data-nav="${n[0]}">${n[1]}</a>`).join('')}</nav>
-    <div class="tools">${CAN_SAY ? `<button class="btn sm toolbtn" id="vbtn" type="button" aria-label="Voz" aria-expanded="false" aria-controls="vpanel">${SPEAKER}<span>Voz</span></button>` : ''}<button class="btn sm toolbtn" id="rbtn" type="button" aria-label="Reiniciar curso" aria-expanded="false" aria-controls="rpanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span>Reiniciar</span></button></div>
+    <div class="tools"><a class="btn sm toolbtn" id="resbtn" href="#resultados" aria-label="Mis resultados" title="Mis resultados"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Resultados</span></a>${CAN_SAY ? `<button class="btn sm toolbtn" id="vbtn" type="button" aria-label="Voz" title="Voz" aria-expanded="false" aria-controls="vpanel">${SPEAKER}<span>Voz</span></button>` : ''}<button class="btn sm toolbtn" id="rbtn" type="button" aria-label="Reiniciar curso" title="Reiniciar curso" aria-expanded="false" aria-controls="rpanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span>Reiniciar</span></button></div>
   </div>
   ${CAN_SAY ? '<div class="vpanel" id="vpanel" hidden><div class="wrap" id="vbody"></div></div>' : ''}
   <div class="vpanel" id="rpanel" hidden><div class="wrap" id="rbody"></div></div></header>
@@ -2979,7 +3324,7 @@ function shell() {
 }
 
 function setNav(name) {
-  const map = { unidad: 'gramatica', vocab: 'vocabulario', test: 'practica', lectura: 'practica' };
+  const map = { unidad: 'gramatica', vocab: 'vocabulario', test: 'practica', lectura: 'practica', resultados: 'practica' };
   const cur = map[name] || name;
   $$('[data-nav]').forEach(a => { if (a.dataset.nav === cur) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 }
@@ -3120,28 +3465,50 @@ function renderUnit(num) {
   if (idx < 0) return notFound();
   const u = UNITS[idx], prev = UNITS[idx - 1], next = UNITS[idx + 1];
   const heads = u.blocks.filter(b => b.t === 'h');
+  const ur = UREAD[u.id];
   view().innerHTML = `<div class="stack">
     <div class="uhead"><div class="crumbs"><a href="#gramatica">Gramática</a> / Unidad ${uNum(u)}</div>
       <div class="row"><span class="plate"><span class="en">Unit ${uNum(u)}</span></span><span class="chip ${lvCls(u.lv)}">${u.lv}</span></div>
       <h1>${u.en}</h1><p class="muted" style="font-size:1.1rem">${u.es}</p></div>
     <div class="layout"><div class="theory">${renderBlocks(u.blocks)}
-      <h3 id="sx" style="scroll-margin-top:90px">Ejercicios</h3>
-      <div id="pr"><div class="cta-end"><div><b>${u.ex.length} ejercicios</b><div class="small muted">Elección múltiple, completar y ordenar. Los errores se guardan para repasarlos después.</div></div><button class="btn primary" id="go" type="button">Empezar</button></div></div>
+      <h3 id="sx" style="scroll-margin-top:90px">${ur ? 'Test 1 · Gramática' : 'Ejercicios'}</h3>
+      <div id="pr">${launcher('g:' + u.id, `${u.ex.length} ejercicios`, 'Elección múltiple, completar, ordenar, corregir errores y traducir. Los errores se guardan para repasarlos después.', 'go')}</div>
+      ${ur ? `<h3 id="sr" style="scroll-margin-top:90px">Test 2 · Lectura</h3>
+      <p class="small muted" style="margin:0">Lee el texto, escúchalo si quieres y responde las preguntas de comprensión.</p>
+      ${readingBody(ur, 'rdu')}
+      <div id="pr2">${launcher('ur:' + u.id, `${ur.qs.length} preguntas de comprensión`, ur.title, 'go2')}</div>` : ''}
       <div class="row" style="justify-content:space-between">${prev ? `<a class="btn" href="${uLink(prev)}">← ${prev.en}</a>` : '<span></span>'}${next ? `<a class="btn" href="${uLink(next)}">${next.en} →</a>` : ''}</div>
     </div>
-    <nav class="toc" aria-label="En esta unidad"><span class="lbl">En esta unidad</span>${heads.map((h, i) => `<a href="#" data-jump="s${i + 1}">${h.h}</a>`).join('')}<a href="#" data-jump="sx">Ejercicios</a></nav></div></div>`;
+    <nav class="toc" aria-label="En esta unidad"><span class="lbl">En esta unidad</span>${heads.map((h, i) => `<a href="#" data-jump="s${i + 1}">${h.h}</a>`).join('')}<a href="#" data-jump="sx">${ur ? 'Test de gramática' : 'Ejercicios'}</a>${ur ? '<a href="#" data-jump="sr">Test de lectura</a>' : ''}</nav></div></div>`;
+  const nextLink = next ? `<a class="btn" href="${uLink(next)}">Siguiente unidad</a>` : '<a class="btn" href="#practica">Ir a Práctica</a>';
   $('#go').addEventListener('click', () => {
-    const host = $('#pr');
-    const run = () => runQuiz(host, u.ex, {
-      title: 'Unidad ' + uNum(u), onDone: r => {
+    runQuiz($('#pr'), u.ex, {
+      title: 'Unidad ' + uNum(u) + ' · Gramática', key: 'g:' + u.id, cat: 'Gramática', href: '#unidad-' + uNum(u), onDone: r => {
         const cur = P.units[u.id] || { best: 0 };
         P.units[u.id] = { best: Math.max(cur.best, r.pct), at: Date.now() };
         save();
-        $('#after', r.host).insertAdjacentHTML('beforeend', next ? `<a class="btn" href="${uLink(next)}">Siguiente unidad</a>` : '<a class="btn" href="#practica">Ir a Práctica</a>');
+        $('#after', r.host).insertAdjacentHTML('beforeend', ur ? '<a class="btn" href="#" data-jump="sr">Ir al test de lectura</a>' : nextLink);
       }
     });
-    run();
   });
+  if (ur) {
+    if ($('#rdu')) $('#rdu').addEventListener('click', () => say(ur.text.map(t => t.replace(/^[A-Za-z .]+: /, '')).join(' ')));
+    $('#go2').addEventListener('click', () => {
+      const make = () => ur.qs.map(x => Object.assign({}, x));
+      runQuiz($('#pr2'), make(), {
+        title: 'Unidad ' + uNum(u) + ' · Lectura', key: 'ur:' + u.id, cat: 'Lectura', href: '#unidad-' + uNum(u), reshuffle: make,
+        onDone: r => { $('#after', r.host).insertAdjacentHTML('beforeend', nextLink); }
+      });
+    });
+  }
+}
+
+/* shared markup for a reading text: listen button, paragraphs and key words */
+function readingBody(r, btnId) {
+  const gl = r.gl && r.gl.length ? `<div class="stack-s" style="gap:6px"><span class="lbl">Palabras útiles</span><div class="chips">${r.gl.map(g => `<span class="tag"><b>${g[0]}</b> · ${g[1]}</span>`).join('')}</div></div>` : '';
+  return `<div class="readbox"><h4 class="rtitle">${r.title}</h4>
+    ${CAN_SAY ? `<div class="row"><button class="btn sm" id="${btnId}" type="button">${SPEAKER} Escuchar el texto</button></div>` : ''}
+    <div class="reading">${r.text.map(p => `<p>${p} ${sayBtn(p.replace(/^[A-Za-z .]+: /, ''))}</p>`).join('')}</div>${gl}</div>`;
 }
 
 /* ---------- Conjugator ---------- */
@@ -3235,7 +3602,7 @@ function renderLists(sub) {
     const pat = r => { const a = r[0], b = r[1], c = r[2]; return a === b && b === c ? 'A-A-A' : (a === c ? 'A-B-A' : (b === c ? 'A-B-B' : 'A-B-C')); };
     body = `<div class="row" style="justify-content:space-between;align-items:flex-end">${searchBox('go, bought, written…')}<div class="row"><button class="btn primary" id="drill" type="button">Practicar 10 verbos</button></div></div>
       <div class="row" id="pf"><span class="lbl">Patrón</span>${['Todos', 'A-A-A', 'A-B-A', 'A-B-B', 'A-B-C'].map((p, i) => `<button type="button" class="chip chipbtn" data-p="${p}" aria-pressed="${i === 0}">${p}</button>`).join('')}</div>
-      <div id="dq"></div>
+      <div class="rt" data-rt="l:irregulares"></div><div id="dq"></div>
       <div class="tblw"><table><thead><tr><th>Base</th><th>Pasado simple</th><th>Participio</th><th>Significado</th><th>Patrón</th></tr></thead><tbody>${IRR.map(r => `<tr data-p="${pat(r)}"><td><b>${r[0]}</b> ${sayBtn(r[0])}</td><td>${r[1]}</td><td>${r[2]}</td><td class="muted">${r[3]}</td><td class="mono">${pat(r)}</td></tr>`).join('')}</tbody></table><div class="tnote">${IRR.length} verbos. El patrón A-A-A significa que las tres formas son iguales (put, put, put). Cuando hay dos formas válidas, las dos cuentan en el ejercicio.</div></div>`;
     after = host => {
       $('#drill', host).addEventListener('click', () => {
@@ -3243,7 +3610,7 @@ function renderLists(sub) {
           ? fill(`<b>${r[0]}</b> · pasado simple → ___`, String(r[1]).split('/'), `${r[0]} – ${r[1]} – ${r[2]}.`)
           : fill(`<b>${r[0]}</b> · participio (I have ___) → ___`, String(r[2]).split('/'), `${r[0]} – ${r[1]} – ${r[2]}.`));
         $('#dq', host).scrollIntoView({ block: 'start' });
-        runQuiz($('#dq', host), make(), { title: 'Verbos irregulares', reshuffle: make });
+        runQuiz($('#dq', host), make(), { title: 'Verbos irregulares', key: 'l:irregulares', cat: 'Listas', href: '#listas-irregulares', reshuffle: make });
       });
       $('#pf', host).addEventListener('click', e => {
         const b = e.target.closest('button'); if (!b) return;
@@ -3254,11 +3621,11 @@ function renderLists(sub) {
   } else if (sub === 'verbprep' || sub === 'adjprep' || sub === 'phrasal') {
     const L = sub === 'verbprep' ? LISTS.verbprep : sub === 'adjprep' ? LISTS.adjprep : LISTS.phrasal;
     const lab = sub === 'phrasal' ? 'Phrasal verb' : (sub === 'verbprep' ? 'Verbo + preposición' : 'Adjetivo + preposición');
-    body = `<div class="row" style="justify-content:space-between;align-items:flex-end">${searchBox('depend, look…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div id="dq"></div>
+    body = `<div class="row" style="justify-content:space-between;align-items:flex-end">${searchBox('depend, look…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div class="rt" data-rt="l:${sub}"></div><div id="dq"></div>
       <div class="tblw"><table><thead><tr><th>${lab}</th><th>Significado</th><th>Ejemplo</th></tr></thead><tbody>${L.map(r => `<tr><td><b>${r[0]}</b></td><td class="muted">${r[1]}</td><td>${braceHtml(r[2])} ${sayBtn(braceBlank(r[2]).replace('___', braceFirst(r[2])))}</td></tr>`).join('')}</tbody></table><div class="tnote">${L.length} entradas. La palabra marcada en el ejemplo es la que se pide en el ejercicio.</div></div>`;
     after = host => $('#drill', host).addEventListener('click', () => {
       $('#dq', host).scrollIntoView({ block: 'start' });
-      runQuiz($('#dq', host), particleQuiz(L, 10), { title: lab, reshuffle: () => particleQuiz(L, 10) });
+      runQuiz($('#dq', host), particleQuiz(L, 10), { title: lab, key: 'l:' + sub, cat: 'Listas', href: '#listas-' + sub, reshuffle: () => particleQuiz(L, 10) });
     });
   } else if (sub === 'patrones') {
     const P2 = LISTS.patterns;
@@ -3272,7 +3639,7 @@ function renderLists(sub) {
     body = `<div class="tblw"><table><thead><tr><th>Preposición</th><th>Se usa con</th><th>Ejemplos</th></tr></thead><tbody>${LISTS.preps.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table></div>`;
   } else if (sub === 'falsos') {
     const F = LISTS.falsos;
-    body = `<div class="row" style="justify-content:space-between;align-items:flex-end">${searchBox('actually, library…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div id="dq"></div>
+    body = `<div class="row" style="justify-content:space-between;align-items:flex-end">${searchBox('actually, library…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div class="rt" data-rt="l:falsos"></div><div id="dq"></div>
       <div class="tblw"><table><thead><tr><th>Inglés</th><th>No significa…</th><th>Significa</th><th>Ejemplo</th></tr></thead><tbody>${F.map(r => `<tr><td><b>${r[0]}</b> ${sayBtn(r[0])}</td><td class="muted">${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join('')}</tbody></table></div>`;
     after = host => $('#drill', host).addEventListener('click', () => {
       const make = () => pick(F, 10).map(r => {
@@ -3281,7 +3648,7 @@ function renderLists(sub) {
         return mc(`¿Qué significa <b>${r[0]}</b>?`, opts, 0, `${r[0]} = ${r[2]}. No es “${r[1]}”. Ejemplo: ${r[3]}`);
       });
       $('#dq', host).scrollIntoView({ block: 'start' });
-      runQuiz($('#dq', host), make(), { title: 'Falsos amigos', reshuffle: make });
+      runQuiz($('#dq', host), make(), { title: 'Falsos amigos', key: 'l:falsos', cat: 'Listas', href: '#listas-falsos', reshuffle: make });
     });
   } else {
     body = `<div class="row">${searchBox('however, although…')}</div><div class="tblw"><table><thead><tr><th>Conector</th><th>Significado</th><th>Función</th><th>Ejemplo</th></tr></thead><tbody>${LISTS.conectores.map(r => `<tr><td><b>${r[0]}</b></td><td class="muted">${r[1]}</td><td>${r[2]}</td><td>${r[3]} ${sayBtn(r[3])}</td></tr>`).join('')}</tbody></table></div>`;
@@ -3312,10 +3679,10 @@ function renderModals() {
     <div class="stack-s"><div class="shead"><h2>Por función</h2></div>
       <div class="row" id="mf">${fns.map(f => `<button type="button" class="chip chipbtn" data-f="${f}" aria-pressed="${f === MODAL_FN}">${f}</button>`).join('')}</div>
       <div class="tblw"><table><thead><tr><th>Función</th><th>Modal</th><th>Ejemplo</th><th>Español</th></tr></thead><tbody id="mt"></tbody></table></div></div>
-    <div class="stack-s"><div class="shead"><h2>Practica los modales</h2></div><div id="mq"><div class="cta-end"><div><b>${MODALQ.length} preguntas</b><div class="small muted">Mezcla de funciones: obligación, deducción, consejo y pasado.</div></div><button class="btn primary" id="mgo" type="button">Empezar</button></div></div></div></div>`;
+    <div class="stack-s"><div class="shead"><h2>Practica los modales</h2></div><div id="mq">${launcher('modales', `${MODALQ.length} preguntas`, 'Mezcla de funciones: obligación, deducción, consejo y pasado.', 'mgo')}</div></div></div>`;
   draw();
   $('#mf').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; MODAL_FN = b.dataset.f; $$('#mf button').forEach(x => x.setAttribute('aria-pressed', x === b)); draw(); });
-  $('#mgo').addEventListener('click', () => runQuiz($('#mq'), MODALQ, { title: 'Modales', reshuffle: () => shuffle(MODALQ) }));
+  $('#mgo').addEventListener('click', () => runQuiz($('#mq'), MODALQ, { title: 'Modales', key: 'modales', cat: 'Modales', href: '#modales', reshuffle: () => shuffle(MODALQ) }));
 }
 
 /* ---------- Vocabulary ---------- */
@@ -3332,7 +3699,7 @@ function renderVocabSet(s) {
     const h = view();
     const k = setProgress(s);
     h.innerHTML = `<div class="stack"><div class="uhead"><div class="crumbs"><a href="#vocabulario">Vocabulario</a> / ${s.title}</div><h1>${s.title}</h1><p class="muted">${s.sub}</p>
-      <div class="row"><div class="seg" id="vt"><button type="button" data-t="cards" aria-pressed="${VTAB === 'cards'}">Tarjetas</button><button type="button" data-t="list" aria-pressed="${VTAB === 'list'}">Lista</button><button type="button" data-t="quiz" aria-pressed="${VTAB === 'quiz'}">Quiz</button></div><span class="small muted">${k} de ${s.items.length} sabidas</span></div></div>
+      <div class="row"><div class="seg" id="vt"><button type="button" data-t="cards" aria-pressed="${VTAB === 'cards'}">Tarjetas</button><button type="button" data-t="list" aria-pressed="${VTAB === 'list'}">Lista</button><button type="button" data-t="quiz" aria-pressed="${VTAB === 'quiz'}">Quiz</button></div><span class="small muted">${k} de ${s.items.length} sabidas</span></div><div class="rt" data-rt="v:${s.id}">${resTag('v:' + s.id)}</div></div>
       <div id="vb"></div></div>`;
     $('#vt').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; VTAB = b.dataset.t; draw(); });
     const vb = $('#vb');
@@ -3343,7 +3710,7 @@ function renderVocabSet(s) {
         const others = pick(s.items.filter(x => x !== i), 3).map(x => x[0]);
         return mc(`¿Cómo se dice <b>${i[1]}</b> en inglés?`, [i[0]].concat(others), 0, `${i[0]}: ${i[2]}`);
       });
-      runQuiz(vb, make(), { title: s.title, reshuffle: make });
+      runQuiz(vb, make(), { title: 'Vocabulario · ' + s.title, key: 'v:' + s.id, cat: 'Vocabulario', href: '#vocab-' + s.id, reshuffle: make });
     } else {
       cards(vb);
     }
@@ -3389,7 +3756,7 @@ function renderIreland(arg) {
       <div class="stack-s"><h3>Giros gramaticales típicos</h3><p class="muted small">Los oirás mucho. Entiéndelos, pero usa la gramática estándar que estudias en el curso.</p>${renderBlocks([TBL(['En Irlanda se dice', 'Inglés estándar', 'Español'], IRISH.quirks)])}</div></div>`;
   } else if (sub === 'britamer') {
     body = `<div class="stack"><p class="muted" style="max-width:66ch">En Irlanda se usa casi siempre el inglés británico: ortografía como <i>colour</i> y palabras como <i>flat</i>, <i>chemist</i> o <i>lift</i>. Conviene reconocer también las formas americanas, porque las verás en películas, internet y tecnología.</p>
-      <div class="row">${searchBox('lift, colour…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div id="dq"></div>
+      <div class="row">${searchBox('lift, colour…')}<button class="btn primary" id="drill" type="button">Practicar 10</button></div><div class="rt" data-rt="ire:brit"></div><div id="dq"></div>
       <div class="stack-s"><h3>Vocabulario</h3><div class="tblw"><table><thead><tr><th>Reino Unido e Irlanda</th><th>Estados Unidos</th><th>Español</th></tr></thead><tbody>${BRAM.words.map(r => `<tr><td><b>${r[0]}</b> ${sayBtn(r[0])}</td><td>${r[1]} ${sayBtn(r[1])}</td><td class="muted">${r[2]}</td></tr>`).join('')}</tbody></table></div></div>
       <div class="stack-s"><h3>Ortografía</h3><div class="tblw"><table><thead><tr><th>Británico</th><th>Americano</th></tr></thead><tbody>${BRAM.spelling.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td></tr>`).join('')}</tbody></table></div></div>
       <div class="stack-s"><h3>Gramática y uso</h3><div class="tblw"><table><thead><tr><th>Británico</th><th>Americano</th><th>Detalle</th></tr></thead><tbody>${BRAM.usage.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td class="muted">${r[2]}</td></tr>`).join('')}</tbody></table></div></div></div>`;
@@ -3400,7 +3767,7 @@ function renderIreland(arg) {
         return mc(`¿Cómo se dice <b>${r[0]}</b> en inglés americano?`, opts, 0, `${r[0]} (UK e Irlanda) = ${r[1]} (EE. UU.). Significa: ${r[2]}.`);
       });
       $('#dq', host).scrollIntoView({ block: 'start' });
-      runQuiz($('#dq', host), make(), { title: 'Británico y americano', reshuffle: make });
+      runQuiz($('#dq', host), make(), { title: 'Británico y americano', key: 'ire:brit', cat: 'Irlanda', href: '#irlanda-britamer', reshuffle: make });
     });
   } else {
     body = `<div class="stack">${IRISH.accent.map(a => `<div class="stack-s"><h3>${a[0]}</h3><div class="tip" style="max-width:none">${a[1]}</div></div>`).join('')}
@@ -3433,7 +3800,7 @@ function renderDialog(id) {
 const PR = { lv: ['A2', 'B1', 'B2'], n: 10, dlv: ['A2', 'B1'] };
 function renderPractice() {
   const wrong = Object.keys(P.wrong).filter(k => EXMAP[k]);
-  view().innerHTML = `<div class="stack"><div class="stack-s"><h1>Práctica</h1><p class="muted" style="max-width:64ch">Repasa mezclando temas, vuelve sobre tus errores o mide tu nivel.</p></div>
+  view().innerHTML = `<div class="stack"><div class="stack-s"><h1>Práctica</h1><p class="muted" style="max-width:64ch">Repasa mezclando temas, vuelve sobre tus errores o mide tu nivel. Cada test que haces queda guardado.</p><div class="row"><a class="btn" href="#resultados">Ver mis resultados</a></div></div>
     <div class="cols2">
       <div class="tile" style="cursor:default"><span class="lbl">Diagnóstico</span><h3>Test de nivel</h3><p>21 preguntas, de A2 a B2. Te recomienda en qué unidad empezar.${P.test ? ` Último resultado: <b>${esc(P.test.level)}</b>.` : ''}</p><a class="btn primary" style="align-self:flex-start;margin-top:6px" href="#test">${P.test ? 'Repetir el test' : 'Empezar el test'}</a></div>
       <div class="tile" style="cursor:default"><span class="lbl">Tus errores</span><h3>Repasar fallos (${wrong.length})</h3><p>${wrong.length ? 'Las preguntas que fallaste salen aquí hasta que las aciertes.' : 'Todavía no tienes errores guardados. Haz ejercicios en las unidades.'}</p><button class="btn primary" id="wr" style="align-self:flex-start;margin-top:6px" type="button" ${wrong.length ? '' : 'disabled'}>Repasar ahora</button></div>
@@ -3441,26 +3808,26 @@ function renderPractice() {
     <div class="stack-s"><div class="shead"><h2>Repaso mixto</h2><p>Preguntas al azar de todas las unidades del nivel que elijas</p></div>
       <div class="row"><span class="lbl">Nivel</span>${['A2', 'B1', 'B2'].map(l => `<button type="button" class="chip chipbtn" data-l="${l}" aria-pressed="${PR.lv.includes(l)}">${l}</button>`).join('')}<span class="lbl" style="margin-left:14px">Preguntas</span>${[10, 20].map(n => `<button type="button" class="chip chipbtn" data-n="${n}" aria-pressed="${PR.n === n}">${n}</button>`).join('')}<button class="btn primary" id="mix" type="button" style="margin-left:14px">Empezar</button></div></div>
     <div class="stack-s"><div class="shead"><h2>¿Qué tiempo es?</h2><p>El ejercicio clave para no confundir los tiempos verbales</p></div>
-      <div class="row"><button class="btn primary" id="tid" type="button">Identificar el tiempo (12)</button><button class="btn" id="tfill" type="button">Completar con el tiempo correcto (12)</button></div></div>
+      <div class="row"><button class="btn primary" id="tid" type="button">Identificar el tiempo (12)</button><button class="btn" id="tfill" type="button">Completar con el tiempo correcto (12)</button></div><div class="rt" data-rt="p:tid"></div><div class="rt" data-rt="p:tfill"></div></div>
     <div class="stack-s"><div class="shead"><h2>Dictados</h2><p>Escucha una frase y escríbela. Entrena el oído y la ortografía</p></div>
-      <div class="row"><span class="lbl">Nivel</span>${['A2', 'B1', 'B2'].map(l => `<button type="button" class="chip chipbtn" data-d="${l}" aria-pressed="${PR.dlv.includes(l)}">${l}</button>`).join('')}<button class="btn primary" id="dict" type="button">Empezar (8 frases)</button></div></div>
+      <div class="row"><span class="lbl">Nivel</span>${['A2', 'B1', 'B2'].map(l => `<button type="button" class="chip chipbtn" data-d="${l}" aria-pressed="${PR.dlv.includes(l)}">${l}</button>`).join('')}<button class="btn primary" id="dict" type="button">Empezar (8 frases)</button></div><div class="rt" data-rt="p:dict"></div></div>
     <div class="stack-s"><div class="shead"><h2>Lectura</h2><p>Textos cortos sobre la vida en Irlanda, con audio y preguntas</p></div>
-      <div class="grid">${READINGS.map(r => `<a class="tile" href="#lectura-${r.id}"><span class="chip ${lvCls(r.lv)}" style="align-self:flex-start">${r.lv}</span><h3>${r.title}</h3><p>${r.qs.length} preguntas</p></a>`).join('')}</div></div>
+      <div class="grid">${READINGS.map(r => `<a class="tile" href="#lectura-${r.id}"><span class="chip ${lvCls(r.lv)}" style="align-self:flex-start">${r.lv}</span><h3>${r.title}</h3><p>${r.qs.length} preguntas${resLast('r:' + r.id) ? ` · Último ${resLast('r:' + r.id).r}/${resLast('r:' + r.id).n}` : ''}</p></a>`).join('')}</div></div>
     <div id="pq" style="scroll-margin-top:90px"></div></div>`;
   const q = $('#pq');
   $('#tid').addEventListener('click', () => {
     const make = () => pick(TENSE_ID, 12).map(r => mc(`¿Qué tiempo verbal es?<br><span style="font-weight:500">${r[0]}</span>`, [r[1]].concat(pick(TENSE_NAMES.filter(n => n !== r[1]), 3)), 0, r[2]));
-    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: '¿Qué tiempo es?', reshuffle: make });
+    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: '¿Qué tiempo es? · Identificar', key: 'p:tid', cat: 'Práctica', href: '#practica', reshuffle: make });
   });
   $('#tfill').addEventListener('click', () => {
     const make = () => pick(TENSE_FILL, 12).map(r => fill(r[0], r[1], r[2]));
-    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: 'Completar con el tiempo correcto', reshuffle: make });
+    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: '¿Qué tiempo es? · Completar', key: 'p:tfill', cat: 'Práctica', href: '#practica', reshuffle: make });
   });
   $$('[data-d]').forEach(b => b.addEventListener('click', () => { const l = b.dataset.d; PR.dlv = PR.dlv.includes(l) ? PR.dlv.filter(x => x !== l) : PR.dlv.concat(l); if (!PR.dlv.length) PR.dlv = [l]; $$('[data-d]').forEach(x => x.setAttribute('aria-pressed', PR.dlv.includes(x.dataset.d))); }));
   $('#dict').addEventListener('click', () => {
     const pool = DICTATIONS.filter(d => PR.dlv.includes(d.lv));
     const make = () => pick(pool, Math.min(8, pool.length));
-    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: 'Dictado', reshuffle: make });
+    q.scrollIntoView({ block: 'start' }); runQuiz(q, make(), { title: 'Dictado', key: 'p:dict', cat: 'Práctica', href: '#practica', reshuffle: make });
   });
   $$('[data-l]').forEach(b => b.addEventListener('click', () => { const l = b.dataset.l; PR.lv = PR.lv.includes(l) ? PR.lv.filter(x => x !== l) : PR.lv.concat(l); if (!PR.lv.length) PR.lv = [l]; $$('[data-l]').forEach(x => x.setAttribute('aria-pressed', PR.lv.includes(x.dataset.l))); }));
   $$('[data-n]').forEach(b => b.addEventListener('click', () => { PR.n = +b.dataset.n; $$('[data-n]').forEach(x => x.setAttribute('aria-pressed', +x.dataset.n === PR.n)); }));
@@ -3468,23 +3835,23 @@ function renderPractice() {
     const pool = [].concat(...UNITS.filter(u => PR.lv.includes(u.lv)).map(u => u.ex));
     const make = () => pick(pool, Math.min(PR.n, pool.length));
     q.scrollIntoView({ block: 'start' });
-    runQuiz(q, make(), { title: 'Repaso mixto', reshuffle: make });
+    runQuiz(q, make(), { title: 'Repaso mixto', key: 'p:mix', cat: 'Práctica', href: '#practica', reshuffle: make });
   });
   const wb = $('#wr');
   if (wb) wb.addEventListener('click', () => {
     const make = () => shuffle(Object.keys(P.wrong).filter(k => EXMAP[k]).map(k => EXMAP[k])).slice(0, 15);
     q.scrollIntoView({ block: 'start' });
-    runQuiz(q, make(), { title: 'Mis errores', reshuffle: make, onDone: () => { setTimeout(() => { const el = $('#after', q); if (el) el.insertAdjacentHTML('beforeend', '<a class="btn" href="#practica" onclick="location.reload()">Actualizar lista</a>'); }, 0); } });
+    runQuiz(q, make(), { title: 'Mis errores', key: 'p:err', cat: 'Práctica', href: '#practica', reshuffle: make, onDone: () => { setTimeout(() => { const el = $('#after', q); if (el) el.insertAdjacentHTML('beforeend', '<a class="btn" href="#practica" onclick="location.reload()">Actualizar lista</a>'); }, 0); } });
   });
 }
 
 /* ---------- Level test ---------- */
 function renderTest() {
-  view().innerHTML = `<div class="stack"><div class="stack-s"><h1>Test de nivel</h1><p class="muted" style="max-width:62ch">21 preguntas de dificultad creciente. Responde sin buscar ayuda: el resultado sirve para ordenar tu estudio. Dura unos 10 minutos.</p></div><div id="tq"><div class="cta-end"><div><b>Empezar el test</b><div class="small muted">7 preguntas A2, 7 preguntas B1 y 7 preguntas B2.</div></div><button class="btn primary" id="tgo" type="button">Empezar</button></div></div></div>`;
+  view().innerHTML = `<div class="stack"><div class="stack-s"><h1>Test de nivel</h1><p class="muted" style="max-width:62ch">21 preguntas de dificultad creciente. Responde sin buscar ayuda: el resultado sirve para ordenar tu estudio. Dura unos 10 minutos.</p></div><div id="tq">${launcher('test', 'Empezar el test', '7 preguntas A2, 7 preguntas B1 y 7 preguntas B2.', 'tgo')}</div></div>`;
   $('#tgo').addEventListener('click', () => {
     const items = LEVELTEST.map((x, i) => Object.assign({}, x, { id: undefined }));
     runQuiz($('#tq'), items, {
-      title: 'Test de nivel', onDone: r => {
+      title: 'Test de nivel', key: 'test', cat: 'Test de nivel', href: '#test', onDone: r => {
         const miss = { A2: 0, B1: 0, B2: 0 };
         r.missed.forEach(m => { miss[m.lv]++; });
         const ok = l => 7 - miss[l] >= 5;
@@ -3527,18 +3894,48 @@ function notFound() { view().innerHTML = `<div class="stack-s"><h1>No encontrado
 function renderReading(id) {
   const r = READINGS.find(x => x.id === id);
   if (!r) { location.hash = 'practica'; return; }
-  const full = r.text.join(' ');
+  const key = 'r:' + r.id;
   view().innerHTML = `<div class="stack"><div class="stack-s"><a class="small" href="#practica">← Práctica</a><span class="chip ${lvCls(r.lv)}" style="align-self:flex-start">${r.lv}</span><h1>${r.title}</h1></div>
-    <div class="row">${CAN_SAY ? `<button class="btn primary" id="rd" type="button">${SPEAKER} Escuchar el texto</button>` : ''}<button class="btn" id="qs" type="button">Responder las preguntas</button></div>
-    <div class="reading">${r.text.map(p => `<p>${p} ${sayBtn(p)}</p>`).join('')}</div>
-    <div id="rq" style="scroll-margin-top:90px"></div></div>`;
-  if ($('#rd')) $('#rd').addEventListener('click', () => say(full));
+    ${readingBody(Object.assign({}, r, { title: 'Texto' }), 'rd')}
+    <div id="rq" style="scroll-margin-top:90px">${launcher(key, `${r.qs.length} preguntas de comprensión`, r.title, 'qs')}</div></div>`;
+  if ($('#rd')) $('#rd').addEventListener('click', () => say(r.text.join(' ')));
   $('#qs').addEventListener('click', () => {
     const make = () => r.qs.map(x => Object.assign({}, x));
-    $('#rq').scrollIntoView({ block: 'start' });
-    runQuiz($('#rq'), make(), { title: r.title, reshuffle: make });
+    runQuiz($('#rq'), make(), { title: 'Lectura · ' + r.title, key, cat: 'Lectura', href: '#lectura-' + r.id, reshuffle: make });
   });
 }
+
+/* ---------- Saved results ---------- */
+function spark(hist) {
+  return `<span class="spark" aria-hidden="true">${hist.slice(-8).map(h => `<i style="height:${Math.max(8, h.pct)}%"></i>`).join('')}</span>`;
+}
+function resRow(title, key, href, extra) {
+  const r = P.res[key], l = resLast(key);
+  const act = `<a class="btn sm${l ? '' : ' primary'}" href="${href}">${l ? 'Repetir test' : 'Hacer test'}</a>`;
+  if (!l) return `<tr class="pend"><td>${title}</td><td class="muted">Pendiente</td><td>${act}</td></tr>`;
+  return `<tr><td>${title}${extra || ''}</td><td><b>${l.r}/${l.n}</b> <span class="muted">(${l.pct}%)</span>${spark(r.hist)}<div class="small muted">Mejor ${r.best}% · ${r.tries} ${r.tries === 1 ? 'intento' : 'intentos'} · ${fmtDate(l.at)}</div></td><td>${act}</td></tr>`;
+}
+function renderResults() {
+  const head = '<thead><tr><th>Test</th><th>Último resultado</th><th></th></tr></thead>';
+  const keys = Object.keys(P.res).filter(k => resLast(k));
+  const attempts = keys.reduce((a, k) => a + P.res[k].tries, 0);
+  const avg = keys.length ? Math.round(keys.reduce((a, k) => a + resLast(k).pct, 0) / keys.length) : 0;
+  const gDone = UNITS.filter(u => resLast('g:' + u.id)).length, rDone = UNITS.filter(u => UREAD[u.id] && resLast('ur:' + u.id)).length;
+  const unitTable = (prefix, label) => `<div class="tblw"><table class="restbl">${head}<tbody>${UNITS.filter(u => prefix === 'g:' || UREAD[u.id]).map(u => resRow(`<b>Unidad ${uNum(u)}</b> · ${u.en}`, prefix + u.id, '#unidad-' + uNum(u))).join('')}</tbody></table></div>`;
+  const other = (cat, label) => {
+    const ks = keys.filter(k => P.res[k].cat === cat && !/^(g|ur):/.test(k));
+    if (!ks.length) return '';
+    return sec(label, '', `<div class="tblw"><table class="restbl">${head}<tbody>${ks.map(k => resRow(esc(P.res[k].title), k, P.res[k].href || '#practica')).join('')}</tbody></table></div>`);
+  };
+  view().innerHTML = `<div class="stack"><div class="stack-s"><h1>Mis resultados</h1><p class="muted" style="max-width:64ch">Aquí queda guardado cada test que haces: el último resultado, el mejor y cuántas veces lo has intentado. Se guardan en este navegador. Puedes repetir cualquier test cuando quieras.</p></div>
+    <div class="vinfo"><div><span class="lbl">Tests hechos</span><b>${keys.length}</b></div><div><span class="lbl">Intentos en total</span><b>${attempts}</b></div><div><span class="lbl">Promedio (último intento)</span><b>${keys.length ? avg + '%' : '—'}</b></div><div><span class="lbl">Gramática</span><b>${gDone}/${UNITS.length}</b></div><div><span class="lbl">Lectura</span><b>${rDone}/${Object.keys(UREAD).length}</b></div></div>
+    ${P.test ? `<div class="tip" style="max-width:none"><span class="lbl">Test de nivel</span>Último nivel estimado: <b>${esc(P.test.level)}</b> (${P.test.score}/${P.test.total}).</div>` : ''}
+    ${sec('Test 1 · Gramática por unidad', '', unitTable('g:'))}
+    ${sec('Test 2 · Lectura por unidad', '', unitTable('ur:'))}
+    ${other('Lectura', 'Lecturas de Práctica')}${other('Práctica', 'Práctica')}${other('Vocabulario', 'Vocabulario')}${other('Listas', 'Listas')}${other('Modales', 'Modales')}${other('Irlanda', 'Irlanda')}${other('Test de nivel', 'Test de nivel')}
+  </div>`;
+}
+
 function route() {
   const h = decodeURIComponent(location.hash.slice(1)) || 'inicio';
   const i = h.indexOf('-');
@@ -3557,9 +3954,11 @@ function route() {
     case 'practica': renderPractice(); break;
     case 'lectura': renderReading(arg); break;
     case 'test': renderTest(); break;
+    case 'resultados': renderResults(); break;
     case 'plan': renderPlan(); break;
     default: renderHome();
   }
+  refreshTags();
   window.scrollTo(0, 0);
 }
 
@@ -3587,11 +3986,11 @@ function closePanels() {
   ['v', 'r'].forEach(k => { const p = $('#' + k + 'panel'), b = $('#' + k + 'btn'); if (p) p.hidden = true; if (b) b.setAttribute('aria-expanded', 'false'); });
 }
 function drawResetPanel() {
-  $('#rbody').innerHTML = `<p style="max-width:72ch;margin:0 0 10px"><b>¿Reiniciar todo el curso?</b> Se borran tus puntajes de unidades, los errores guardados, las palabras marcadas como sabidas, las semanas completadas, la fecha de inicio y el resultado del test. La voz que elegiste se mantiene. No se puede deshacer.</p>
+  $('#rbody').innerHTML = `<p style="max-width:72ch;margin:0 0 10px"><b>¿Reiniciar todo el curso?</b> Se borran tus puntajes y resultados de tests, los errores guardados, las palabras marcadas como sabidas, las semanas completadas, la fecha de inicio y el resultado del test. La voz que elegiste se mantiene. No se puede deshacer.</p>
     <div class="row"><button class="btn danger" id="rgo" type="button">Sí, borrar todo</button><button class="btn" id="rno" type="button">Cancelar</button></div>`;
   $('#rno').addEventListener('click', closePanels);
   $('#rgo').addEventListener('click', () => {
-    P.units = {}; P.wrong = {}; P.vocab = {}; P.weeks = {}; delete P.test; delete P.start; save();
+    P.units = {}; P.wrong = {}; P.vocab = {}; P.weeks = {}; P.res = {}; delete P.test; delete P.start; save();
     $('#rbody').innerHTML = '<p style="margin:0" role="status"><b>Listo.</b> El curso quedó en cero.</p>';
     setTimeout(() => { closePanels(); if (location.hash && location.hash !== '#inicio') location.hash = 'inicio'; else route(); }, 1200);
   });
